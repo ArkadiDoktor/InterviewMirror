@@ -343,9 +343,10 @@ with tab1:
                 "active": True,
                 "started": True,
                 "itype": itype,
-                "job_role": job_role, 
+                "job_role": job_role, # השדה החדש ששומר את התפקיד
                 "feedback_mode": feedback,
-                "interview_id": str(uuid.uuid4()) # ◄◄◄ יוצר מזהה ייחודי חדש בכל לחיצה!
+                "sys_prompt": build_prompt(itype, job_role, feedback), # הפרומפט המקורי שלך!
+                "interview_id": str(uuid.uuid4()) # ה-ID החדש ל-Firebase
             })
             with st.spinner("המראיין מתחיל..."):
                 first = get_reply([], st.session_state.sys_prompt)
