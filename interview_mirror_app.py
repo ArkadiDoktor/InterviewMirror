@@ -11,10 +11,17 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 
-GROQ_API_KEY = "YOUR_API_KEY_HERE"
+# 1. Securely fetch the API key (Checks Streamlit Secrets first, falls back to local env)
+if "GROQ_API_KEY" in st.secrets:
+    api_key = st.secrets["GROQ_API_KEY"]
+else:
+    api_key = os.environ.get("GROQ_API_KEY", "YOUR_LOCAL_FALLBACK_KEY")
+
 LLM_MODEL    = "llama-3.3-70b-versatile"
 STT_MODEL    = "whisper-large-v3-turbo"
-client       = Groq(api_key=GROQ_API_KEY)
+
+# 2. Initialize the Groq Client safely
+client = Groq(api_key=api_key)
 
 INTERVIEWER_TYPES = {
     "ידידותי": "אתה מראיין ידידותי, חם ומעודד. שואל שאלות ברורות ופתוחות.",
