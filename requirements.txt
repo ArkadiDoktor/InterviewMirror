@@ -1,0 +1,7 @@
+streamlit
+groq
+gtts
+matplotlib
+numpy
+requests
+edge-tts
