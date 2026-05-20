@@ -1,8 +1,8 @@
-# 🪞 InterviewMirror
+# InterviewMirror
 
 **סימולטור ראיון עבודה חכם בעברית מבוסס בינה מלאכותית**
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://interviewmirror.streamlit.app)
+[![Streamlit App]](https://interviewmirror.streamlit.app)
 
 ---
 
@@ -24,7 +24,7 @@ InterviewMirror היא מערכת סימולציה אינטראקטיבית לר
 | 👔 3 סוגי מראיינים | ידידותי / טכני / קשוח – כל אחד עם סגנון שונה |
 | 📊 ניתוח ביצועים | גרף התקדמות ציונים, חוזקות ונקודות לשיפור |
 | 💬 פידבק בזמן אמת | ציון X/10 לאחר כל תשובה (אופציונלי) |
-| 🗄️ שמירת נתונים | כל ראיון נשמר ב-Firebase לניתוח עתידי |
+| 🗄️ שמירת נתונים | כל ראיון נשמר במאגר נתונים לניתוח עתידי |
 
 ---
 
