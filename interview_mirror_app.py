@@ -397,10 +397,9 @@ with tab2:
                 st.session_state.history.append({"role":"assistant","content":reply})
                 st.session_state.last_audio = do_tts(reply)
                 
-                # 💾 שמירה ל-Firebase
                 try:
                     save_response_to_db(
-                        interviewer_type=st.session_state.get("interviewer_type", "קשוח"),
+                        interviewer_type=st.session_state.get("itype", "טכני"),
                         question=last_question,
                         user_answer=answer,
                         ai_feedback=reply
