@@ -2,7 +2,7 @@
 
 **סימולטור ראיון עבודה חכם בעברית מבוסס בינה מלאכותית**
 
-[![Streamlit App]](https://interviewmirror.streamlit.app)
+[Streamlit App](https://interviewmirror.streamlit.app)
 
 ---
 
