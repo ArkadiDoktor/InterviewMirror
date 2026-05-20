@@ -10,6 +10,7 @@ except:
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+import uuid
 
 from firebase_admin import credentials, firestore, initialize_app, _apps
 
@@ -336,9 +337,16 @@ with tab1:
         if not job_role.strip():
             st.error("נא להזין תפקיד")
         else:
-            st.session_state.update({"history":[],"per_answer":[],"active":True,
-                "started":True,"itype":itype,"feedback_mode":feedback,
-                "sys_prompt":build_prompt(itype,job_role,feedback)})
+            st.session_state.update({
+                "history": [],
+                "per_answer": [],
+                "active": True,
+                "started": True,
+                "itype": itype,
+                "job_role": job_role, 
+                "feedback_mode": feedback,
+                "interview_id": str(uuid.uuid4()) # ◄◄◄ יוצר מזהה ייחודי חדש בכל לחיצה!
+            })
             with st.spinner("המראיין מתחיל..."):
                 first = get_reply([], st.session_state.sys_prompt)
             st.session_state.history.append({"role":"assistant","content":first})
@@ -399,9 +407,13 @@ with tab2:
                 
                 try:
                     save_response_to_db(
+                        interview_id=st.session_state.get("interview_id"),
+                        turn_index=len(st.session_state.history),
                         interviewer_type=st.session_state.get("itype", "טכני"),
+                        job_role=st.session_state.get("job_role", "כללי"),
                         question=last_question,
                         user_answer=answer,
+                        score=extracted_numeric_score,
                         ai_feedback=reply
                     )
                 except Exception as e:
