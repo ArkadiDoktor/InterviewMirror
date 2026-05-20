@@ -5,4 +5,3 @@ matplotlib
 numpy
 requests
 edge-tts
-streamlit-firestore-connection
