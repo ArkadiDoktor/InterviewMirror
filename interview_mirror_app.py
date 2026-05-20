@@ -14,38 +14,45 @@ import numpy as np
 from firebase_admin import credentials, firestore, initialize_app, _apps
 
 if not _apps:
-    # יצירת דיקשנרי של ה-Credentials ישירות מתוך ה-Secrets של Streamlit
-    cred_dict = {
-        "type": st.secrets["firestore"]["type"],
-        "project_id": st.secrets["firestore"]["project_id"],
-        "private_key_id": st.secrets["firestore"]["private_key_id"],
-        "private_key": st.secrets["firestore"]["private_key"].replace(r"\n", "\n"),
-        "client_email": st.secrets["firestore"]["client_email"],
-        "client_id": st.secrets["firestore"]["client_id"],
-        "auth_uri": st.secrets["firestore"]["auth_uri"],
-        "token_uri": st.secrets["firestore"]["token_uri"],
-        "auth_provider_x509_cert_url": st.secrets["firestore"]["auth_provider_x509_cert_url"],
-        "client_x509_cert_url": st.secrets["firestore"]["client_x509_cert_url"]
-    }
-    cred = credentials.Certificate(cred_dict)
-    initialize_app(cred)
-
-# יצירת החיבור לבסיס הנתונים
-db = firestore.client()
-
-# פונקציית השמירה החדשה שלך (פשוטה ובטוחה)
-def save_response_to_db(interviewer_type, question, user_answer, ai_feedback):
     try:
-        doc_ref = db.collection("interview_responses").document()
-        doc_ref.set({
-            "interviewer_type": interviewer_type,
-            "question": question,
-            "user_answer": user_answer,
-            "ai_feedback": ai_feedback,
-            "timestamp": firestore.SERVER_TIMESTAMP # שומר אוטומטית את זמן השרת
-        })
+        # משיכת פרטי החיבור מתוך ה-Streamlit Secrets
+        cred_dict = {
+            "type": st.secrets["connections"]["firestore"]["type"],
+            "project_id": st.secrets["connections"]["firestore"]["project_id"],
+            "private_key_id": st.secrets["connections"]["firestore"]["private_key_id"],
+            "private_key": st.secrets["connections"]["firestore"]["private_key"].replace(r"\n", "\n"),
+            "client_email": st.secrets["connections"]["firestore"]["client_email"],
+            "client_id": st.secrets["connections"]["firestore"]["client_id"],
+            "auth_uri": st.secrets["connections"]["firestore"]["auth_uri"],
+            "token_uri": st.secrets["connections"]["firestore"]["token_uri"],
+            "auth_provider_x509_cert_url": st.secrets["connections"]["firestore"]["auth_provider_x509_cert_url"],
+            "client_x509_cert_url": st.secrets["connections"]["firestore"]["client_x509_cert_url"]
+        }
+        cred = credentials.Certificate(cred_dict)
+        initialize_app(cred)
     except Exception as e:
-        st.error(f"שגיאה בשמירת הנתונים: {e}")
+        st.error(f"שגיאה באתחול בסיס הנתונים: {e}. ודא שהגדרת את ה-Secrets כראוי.")
+
+# יצירת אובייקט ה-Client לעבודה מול ה-Database
+try:
+    db = firestore.client()
+except Exception:
+    db = None
+
+# פונקציה לשמירת תשובות בבסיס הנתונים
+def save_response_to_db(interviewer_type, question, user_answer, ai_feedback):
+    if db is not None:
+        try:
+            doc_ref = db.collection("interview_responses").document()
+            doc_ref.set({
+                "interviewer_type": interviewer_type,
+                "question": question,
+                "user_answer": user_answer,
+                "ai_feedback": ai_feedback,
+                "timestamp": firestore.SERVER_TIMESTAMP  # שומר אוטומטית את זמן השרת
+            })
+        except Exception as e:
+            st.error(f"נכשלה שמירת הנתונים בבסיס הנתונים: {e}")
 
 # 1. Securely fetch the API key (Checks Streamlit Secrets first, falls back to local env)
 if "GROQ_API_KEY" in st.secrets:
