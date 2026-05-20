@@ -41,14 +41,18 @@ except Exception:
     db = None
 
 # פונקציה לשמירת תשובות בבסיס הנתונים
-def save_response_to_db(interviewer_type, question, user_answer, ai_feedback):
+def save_response_to_db(interview_id, turn_index, interviewer_type, job_role, question, user_answer, score, ai_feedback):
     if db is not None:
         try:
             doc_ref = db.collection("interview_responses").document()
             doc_ref.set({
+                "interview_id": interview_id,
+                "turn_index": turn_index,
                 "interviewer_type": interviewer_type,
+                "job_role": job_role,
                 "question": question,
                 "user_answer": user_answer,
+                "score": score,
                 "ai_feedback": ai_feedback,
                 "timestamp": firestore.SERVER_TIMESTAMP  # שומר אוטומטית את זמן השרת
             })
