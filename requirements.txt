@@ -5,3 +5,4 @@ matplotlib
 numpy
 requests
 edge-tts
+firebase-admin
