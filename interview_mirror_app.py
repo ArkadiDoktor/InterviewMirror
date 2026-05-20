@@ -383,12 +383,31 @@ with tab2:
                     with st.spinner("מתמלל..."): answer = do_stt(audio_input.read())
                     st.caption(f"זוהה: {answer}")
             if answer:
+                # מציאת השאלה האחרונה שהמראיין שאל (הודעת ה-assistant האחרונה בהיסטוריה כרגע)
+                last_question = "שאלה פותחת"
+                for msg in reversed(st.session_state.history):
+                    if msg["role"] == "assistant":
+                        last_question = msg["content"]
+                        break
+
                 st.session_state.per_answer.append(analyze_answer(answer))
                 st.session_state.history.append({"role":"user","content":answer})
                 with st.spinner("המראיין חושב..."):
                     reply = get_reply(st.session_state.history, st.session_state.sys_prompt)
                 st.session_state.history.append({"role":"assistant","content":reply})
                 st.session_state.last_audio = do_tts(reply)
+                
+                # 💾 שמירה ל-Firebase
+                try:
+                    save_response_to_db(
+                        interviewer_type=st.session_state.get("interviewer_type", "קשוח"),
+                        question=last_question,
+                        user_answer=answer,
+                        ai_feedback=reply
+                    )
+                except Exception as e:
+                    st.error(f"שגיאה בשמירה ל-Firebase: {e}")
+
                 if "הראיון הסתיים" in reply:
                     st.session_state.active = False
                 st.rerun()
