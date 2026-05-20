@@ -406,6 +406,12 @@ with tab2:
                 st.session_state.history.append({"role":"assistant","content":reply})
                 st.session_state.last_audio = do_tts(reply)
                 
+                # חילוץ הציון המספרי מתוך הפידבק של ה-AI (למשל מתוך "ציון 2/10")
+                import re as _re
+                score_match = _re.search(r"ציון\s*(\d+)", reply)
+                extracted_score = int(score_match.group(1)) if score_match else None
+                
+                # שמירה ל-Firebase
                 try:
                     save_response_to_db(
                         interview_id=st.session_state.get("interview_id"),
@@ -414,15 +420,19 @@ with tab2:
                         job_role=st.session_state.get("job_role", "כללי"),
                         question=last_question,
                         user_answer=answer,
-                        score=extracted_numeric_score,
+                        score=extracted_score, # ◄◄◄ עכשיו המשתנה הזה קיים ומחושב!
                         ai_feedback=reply
                     )
-                except Exception as e:
-                    st.error(f"שגיאה בשמירה ל-Firebase: {e}")
+                    
+                    # הריצה מחדש תקרה רק אם השמירה עברה בהצלחה
+                    if "הראיון הסתיים" in reply:
+                        st.session_state.active = False
+                    st.rerun()
 
-                if "הראיון הסתיים" in reply:
-                    st.session_state.active = False
-                st.rerun()
+                except Exception as e:
+                    # מונע rerun ומציג לך את השגיאה האמיתית על המסך אם משהו נדפק
+                    st.error(f"שגיאה בשמירה ל-Firebase: {e}")
+                    st.stop()
         else:
             st.success("הראיון הסתיים – עבור לטאב ניתוח ביצועים")
 
