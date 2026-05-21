@@ -2,7 +2,7 @@
 
 **An AI-powered interactive job interview simulator in Hebrew**
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://interviewmirror.streamlit.app)
+[Streamlit App](https://interviewmirror.streamlit.app)
 
 ---
 
@@ -130,15 +130,6 @@ Step 2 — Interview   Answer questions by text or voice
 Step 3 — Analysis    Receive scores, strengths, and improvement points
 ```
 
-### Scoring Metrics
-
-| Metric | Methodology |
-|---|---|
-| Overall score | Average of LLM-assigned scores throughout the interview |
-| Clarity | Based on answer length and structure |
-| Confidence | Based on strong vs. hesitant language patterns |
-| Professionalism | Based on domain-specific terminology usage |
-
 ---
 
 ## Firebase Data Schema
@@ -160,17 +151,5 @@ Each interview turn is stored with the following fields:
 ```
 
 ---
-
-## Roadmap
-
-- Integration with HeyGen API for high-quality talking avatar
-- Multi-language support
-- Advanced analytics dashboard over Firebase data
-- CV-aware question generation
-- Blind interview mode (no real-time feedback)
-
----
-
-## License
 
 This project was developed as part of an academic course project.
