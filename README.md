@@ -150,6 +150,3 @@ Each interview turn is stored with the following fields:
 }
 ```
 
----
-
-This project was developed as part of an academic course project.
