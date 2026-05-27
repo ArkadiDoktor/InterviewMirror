@@ -41,7 +41,7 @@ except Exception:
     db = None
 
 # פונקציה לשמירת תשובות בבסיס הנתונים
-def save_response_to_db(interview_id, turn_index, interviewer_type, job_role, question, user_answer, score, ai_feedback):
+def save_response_to_db(interview_id, turn_index, interviewer_type, job_role, question, user_answer, score, ai_feedback, input_method):
     if db is not None:
         try:
             doc_ref = db.collection("interview_responses").document()
