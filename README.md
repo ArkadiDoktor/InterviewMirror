@@ -146,6 +146,7 @@ Each interview turn is stored with the following fields:
   "user_answer": "Candidate answer text",
   "score": 7,
   "ai_feedback": "Full LLM feedback",
+  "input_method": "Text or Microphone",
   "timestamp": "server timestamp"
 }
 ```
