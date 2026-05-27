@@ -12,11 +12,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import uuid
 
-from firebase_admin import credentials, firestore, initialize_app, _apps
+import firebase_admin
+from firebase_admin import credentials, firestore
 
-if not _apps:
+if not firebase_admin._apps:
     try:
-        # משיכת פרטי החיבור מתוך ה-Streamlit Secrets
         cred_dict = {
             "type": st.secrets["connections"]["firestore"]["type"],
             "project_id": st.secrets["connections"]["firestore"]["project_id"],
@@ -30,9 +30,9 @@ if not _apps:
             "client_x509_cert_url": st.secrets["connections"]["firestore"]["client_x509_cert_url"]
         }
         cred = credentials.Certificate(cred_dict)
-        initialize_app(cred)
+        firebase_admin.initialize_app(cred)
     except Exception as e:
-        st.error(f"שגיאה באתחול בסיס הנתונים: {e}. ודא שהגדרת את ה-Secrets כראוי.")
+        st.error(f"שגיאה באתחול בסיס הנתונים: {e}")
 
 # יצירת אובייקט ה-Client לעבודה מול ה-Database
 try:
