@@ -54,6 +54,7 @@ def save_response_to_db(interview_id, turn_index, interviewer_type, job_role, qu
                 "user_answer": user_answer,
                 "score": score,
                 "ai_feedback": ai_feedback,
+                "input_method": input_method,
                 "timestamp": firestore.SERVER_TIMESTAMP  # שומר אוטומטית את זמן השרת
             })
         except Exception as e:
@@ -417,6 +418,10 @@ with tab2:
                     with st.spinner("מתמלל..."): answer = do_stt(audio_input.read())
                     st.caption(f"זוהה: {answer}")
             if answer:
+                if user_input:
+                    input_method = "text"
+                elif audio_input is not None:
+                    input_method = "voice"
                 # מציאת השאלה האחרונה שהמראיין שאל (הודעת ה-assistant האחרונה בהיסטוריה כרגע)
                 last_question = "שאלה פותחת"
                 for msg in reversed(st.session_state.history):
@@ -445,8 +450,9 @@ with tab2:
                         job_role=st.session_state.get("job_role", "כללי"),
                         question=last_question,
                         user_answer=answer,
-                        score=extracted_score, # ◄◄◄ עכשיו המשתנה הזה קיים ומחושב!
-                        ai_feedback=reply
+                        score=extracted_score, 
+                        ai_feedback=reply,
+                        input_method=input_method
                     )
                     
                     # הריצה מחדש תקרה רק אם השמירה עברה בהצלחה
