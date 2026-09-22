@@ -8,7 +8,7 @@
 
 ## Overview
 
-InterviewMirror is a real-time job interview simulation system designed to prepare candidates for actual interviews. Unlike existing tools on the market, the system conducts a **fully dynamic conversation** — questions are adapted to the candidate's responses rather than being predetermined.
+InterviewMirror is a real-time job interview simulation system designed to prepare candidates for actual interviews. Unlike existing tools on the market, the system conducts a **fully dynamic conversation** - questions are adapted to the candidate's responses rather than being predetermined.
 
 > The first product on the market offering a fully interactive job interview simulation in the **Hebrew language**.
 
@@ -19,9 +19,9 @@ InterviewMirror is a real-time job interview simulation system designed to prepa
 | Feature | Description |
 |---|---|
 | Dynamic conversation | The interviewer responds to answer content and adapts follow-up questions accordingly |
-| Voice input | Answer by speaking — Groq Whisper transcribes Hebrew in real time |
+| Voice input | Answer by speaking - Groq Whisper transcribes Hebrew in real time |
 | Interviewer voice | The interviewer speaks Hebrew via edge-tts (he-IL-AvriNeural) |
-| 3 interviewer personas | Friendly / Technical / Tough — each with a distinct style and behavior |
+| 3 interviewer personas | Friendly / Technical / Tough - each with a distinct style and behavior |
 | Performance analysis | Score progression chart, strengths, and improvement points |
 | Real-time feedback | Score out of 10 after each answer (optional) |
 | Data persistence | Every interview is saved to Firebase Firestore for future analysis |
@@ -45,7 +45,7 @@ InterviewMirror is a real-time job interview simulation system designed to prepa
 
 | Component | Technology |
 |---|---|
-| LLM | Groq LLaMA 3.3 70B |
+| LLM | Groq GPT OSS 120B |
 | Speech-to-Text | Groq Whisper Large v3 |
 | Text-to-Speech | edge-tts (he-IL-AvriNeural) |
 | UI Framework | Streamlit |
@@ -125,9 +125,9 @@ interviewmirror/
 ## Interview Flow
 
 ```
-Step 1 — Settings    Select job role and interviewer type
-Step 2 — Interview   Answer questions by text or voice
-Step 3 — Analysis    Receive scores, strengths, and improvement points
+Step 1 - Settings    Select job role and interviewer type
+Step 2 - Interview   Answer questions by text or voice
+Step 3 - Analysis    Receive scores, strengths, and improvement points
 ```
 
 ---
