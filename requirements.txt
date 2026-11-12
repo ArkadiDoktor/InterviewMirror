@@ -1,8 +1,5 @@
-streamlit
-groq
-gtts
-matplotlib
-numpy
-requests
-edge-tts
-firebase-admin
+streamlit==1.67.0
+requests>=2.31
+edge-tts>=7.2
+gTTS>=2.5
+firebase-admin>=6.5

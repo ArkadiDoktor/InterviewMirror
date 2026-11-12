@@ -1,153 +1,130 @@
 # InterviewMirror
 
-**An AI-powered interactive job interview simulator in Hebrew**
+**A realistic job-interview simulator in Hebrew, running entirely on free tiers.**
 
-[Streamlit App](https://interviewmirror.streamlit.app)
+[Live app](https://interviewmirror.streamlit.app)
 
----
+An interviewer with a face and a voice asks you questions, listens to what you
+actually say, pushes back, moves on when a question is going nowhere, and ends
+the meeting if you waste his time. Afterwards you get a report: a score, what
+worked, what to fix, and how each answer could have been stronger.
 
-## Overview
+## What is new in v2
 
-InterviewMirror is a real-time job interview simulation system designed to prepare candidates for actual interviews. Unlike existing tools on the market, the system conducts a **fully dynamic conversation** - questions are adapted to the candidate's responses rather than being predetermined.
+| Area | v1 | v2 |
+|---|---|---|
+| Conversation | One prompt; the bot re-asked the same question whenever the answer was off | An interview engine (state machine) owns the agenda. The model plays the interviewer; the engine decides how long to stay on a question and when to move on or stop |
+| Edge cases | "Ignore and repeat the question" | 16 answer types (don't know, asks for a hint, joke, off-topic, refusal, prompt injection, hostility, wants to stop ...) each handled the way a person would, with an escalation ladder per interviewer |
+| Personas | Three tone descriptions | Three characters with a name, background, agenda of topics, reactions, scoring strictness, patience, voice and body language |
+| Feedback | Regex over the chat text | Private structured evaluation per answer + a full report (competencies, per-answer review, practice plan). Live feedback is optional |
+| Avatar | Static photo | The photo itself talks: mouth follows the voice, eyes blink, head moves, the interviewer "thinks" while the reply is prepared. Rendered in the browser, no video service |
+| Reliability | One model; a failed DB write stopped the app | Fail-over across several free models, answers are never lost on a rate limit, storage errors never interrupt an interview |
+| Interface | Three tabs, manual audio player | Setup -> interview room -> report. Voice starts by itself, one input bar for typing or speaking, works on a phone |
 
-> The first product on the market offering a fully interactive job interview simulation in the **Hebrew language**.
+## How it works
 
----
-
-## Key Features
-
-| Feature | Description |
-|---|---|
-| Dynamic conversation | The interviewer responds to answer content and adapts follow-up questions accordingly |
-| Voice input | Answer by speaking - Groq Whisper transcribes Hebrew in real time |
-| Interviewer voice | The interviewer speaks Hebrew via edge-tts (he-IL-AvriNeural) |
-| 3 interviewer personas | Friendly / Technical / Tough - each with a distinct style and behavior |
-| Performance analysis | Score progression chart, strengths, and improvement points |
-| Real-time feedback | Score out of 10 after each answer (optional) |
-| Data persistence | Every interview is saved to Firebase Firestore for future analysis |
-
----
-
-## Comparison with Competitors
-
-|  | InterviewMirror | Google Interview Warmup | Yoodli | Final Round AI |
-|---|:---:|:---:|:---:|:---:|
-| Dynamic conversation | Yes | No | No | Partial |
-| Full Hebrew support | Yes | No | No | No |
-| Voice input (STT) | Yes | Yes | Yes | Yes |
-| Talking avatar | Yes | No | No | No |
-| Multiple interviewer types | Yes | No | No | No |
-| Pricing | Free* | Free | Freemium | $29+/month |
-
----
-
-## Technology Stack
-
-| Component | Technology |
-|---|---|
-| LLM | Groq GPT OSS 120B |
-| Speech-to-Text | Groq Whisper Large v3 |
-| Text-to-Speech | edge-tts (he-IL-AvriNeural) |
-| UI Framework | Streamlit |
-| Data Visualization | Matplotlib |
-| Database | Firebase Firestore |
-| Talking Avatar | D-ID API (concept) |
-
----
-
-## Local Setup
-
-### Prerequisites
-- Python 3.10 or higher
-- [Groq](https://console.groq.com) account (free tier available)
-- [Firebase](https://firebase.google.com) project with Firestore enabled
-
-### 1. Clone the repository
-```bash
-git clone https://github.com/your-username/interviewmirror.git
-cd interviewmirror
+```
+interview_mirror_app.py     the three screens (Streamlit)
+im/
+  engine.py                 interview state machine + guardrails (plain Python, unit-tested)
+  personas.py               the three interviewers
+  prompts.py                interviewer instructions, per-turn director notes, report prompt
+  llm.py                    OpenAI-compatible client with fail-over and rate-limit back-off
+  speech.py                 text-to-speech (edge-tts -> gTTS) and speech-to-text (Whisper on Groq)
+  avatar.py + assets/       talking-avatar component (WebGL face mesh, Web Audio lip-sync)
+  report.py                 final report, with a no-model fallback
+  storage.py                optional Firestore persistence
+  ui.py                     stylesheet and HTML snippets
+tools/build_avatar_mesh.py  one-off tool: prepare a new portrait photo for animation
+tests/                      pytest suite (scripted model, no network needed)
 ```
 
-### 2. Install dependencies
+**The engine.** Every turn the model returns JSON: how it reads the candidate's
+message (`kind`), a private evaluation, a `decision` (follow up / next topic /
+stay / end) and what it says out loud. The engine checks that against its own
+counters - main questions, follow-ups per topic, failed attempts on the current
+question, disruptions versus the interviewer's patience - and against the last
+few questions (no repeats). A reply that breaks a rule gets one corrective
+retry; after that a deterministic fallback takes over, so a conversation can
+never loop.
+
+**The avatar.** `tools/build_avatar_mesh.py` runs MediaPipe Face Mesh once per
+photo and stores 478 landmarks. In the browser the photo is drawn as a WebGL
+triangle mesh; moving the landmarks opens the jaw, closes the eyelids, raises
+the brows and turns the head with a little parallax. Mouth opening follows the
+loudness of the interviewer's voice and mouth shape follows its brightness
+(Web Audio analyser). This is lip *movement*, not phoneme-accurate lip-sync -
+that is the trade for costing nothing.
+
+## Free stack
+
+| Part | Service | Notes (free tier, checked November 2026) |
+|---|---|---|
+| Interviewer model | Groq: `openai/gpt-oss-120b` -> `qwen/qwen3.8-27b` -> `openai/gpt-oss-20b` | Each model has its own daily budget; the app falls through the list on a rate limit |
+| Report model | Gemini `gemini-3.8-flash` if a key is set, otherwise Groq | Optional |
+| Speech-to-text | Groq Whisper large v3 | |
+| Text-to-speech | edge-tts (`he-IL-AvriNeural`), fallback gTTS, last resort the browser's own voice | No key |
+| Avatar | In-browser WebGL + Web Audio | No service at all |
+| Hosting | Streamlit Community Cloud | |
+| Database | Firebase Firestore, Spark plan | Optional |
+
+Free-tier limits change often. Models can be swapped in secrets
+(`LLM_ROUTES_TURN`, `LLM_ROUTES_REPORT`) without editing code.
+
+## Run locally
+
+Python 3.10 or newer.
+
 ```bash
+git clone https://github.com/ArkadiDoktor/InterviewMirror.git
+cd InterviewMirror
 pip install -r requirements.txt
-```
-
-### 3. Configure secrets
-
-Create the file `.streamlit/secrets.toml`:
-
-```toml
-GROQ_API_KEY = "gsk_your_groq_key_here"
-
-[connections.firestore]
-type = "service_account"
-project_id = "your-project-id"
-private_key_id = "your-key-id"
-private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-client_email = "your-service-account@project.iam.gserviceaccount.com"
-client_id = "your-client-id"
-auth_uri = "https://accounts.google.com/o/oauth2/auth"
-token_uri = "https://oauth2.googleapis.com/token"
-auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
-client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/..."
-```
-
-### 4. Run
-```bash
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml   # then put your Groq key in it
 streamlit run interview_mirror_app.py
 ```
 
-Open your browser at `http://localhost:8501`
+Only `GROQ_API_KEY` is required. Without the Firestore block the app runs and
+simply does not save interviews.
 
----
+## Tests
 
-## Live Demo
-
-The project is deployed on Streamlit Cloud:
-
-**[https://interviewmirror.streamlit.app](https://interviewmirror.streamlit.app)**
-
----
-
-## Project Structure
-
-```
-interviewmirror/
-├── interview_mirror_app.py   # Main application code
-├── requirements.txt          # Python dependencies
-├── D-ID avatar concept.mkv   # Talking avatar concept demonstration
-└── README.md
+```bash
+pip install -r requirements-dev.txt
+pytest -q
 ```
 
----
+The suite drives the engine with a scripted model and the HTTP clients with a
+local stand-in server, so it needs neither a key nor a network connection.
 
-## Interview Flow
+## Adding or replacing an interviewer's face
 
-```
-Step 1 - Settings    Select job role and interviewer type
-Step 2 - Interview   Answer questions by text or voice
-Step 3 - Analysis    Receive scores, strengths, and improvement points
-```
+Use a frontal portrait you have the right to use: mouth closed, eyes open,
+square crop, 300-600 px.
 
----
-
-## Firebase Data Schema
-
-Each interview turn is stored with the following fields:
-
-```json
-{
-  "interview_id": "uuid",
-  "turn_index": 3,
-  "interviewer_type": "Technical",
-  "job_role": "AI Engineer",
-  "question": "Interviewer question text",
-  "user_answer": "Candidate answer text",
-  "score": 7,
-  "ai_feedback": "Full LLM feedback",
-  "input_method": "Text or Microphone",
-  "timestamp": "server timestamp"
-}
+```bash
+pip install "mediapipe==0.10.14" opencv-python scipy numpy     # dev machine only
+python tools/build_avatar_mesh.py im/assets/friendly.jpg       # writes friendly.mesh.json
 ```
 
+A new persona is one more `Persona(...)` entry in `im/personas.py` plus
+`<key>.jpg` and `<key>.mesh.json` in `im/assets/`.
+
+## Data
+
+Firestore is schemaless, so v2 needs no migration.
+
+- `interview_responses` - one document per answer. All v1 fields are unchanged
+  (`interview_id`, `turn_index`, `interviewer_type`, `job_role`, `question`,
+  `user_answer`, `score`, `ai_feedback`, `input_method`, `timestamp`); v2 adds
+  `interviewer_reply`, `answer_kind`, `decision`, `topic`, `main_question`,
+  `tip`, `model`, `app_version`.
+- `interview_sessions` - new: one document per finished interview with the
+  settings, scores, how it ended and the report.
+
+## Known limits
+
+- Lip movement follows the sound of the voice, not the exact phonemes.
+- All three interviewers use the same male Hebrew voice at different pitch and pace.
+- Free model quotas are shared by everyone using the deployment; at busy
+  moments a reply can be delayed (the answer is kept and can be resent).
+- `D-ID avatar concept.mp4` in the repository is the earlier paid-avatar concept, kept for reference.
