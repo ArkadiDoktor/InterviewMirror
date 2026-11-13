@@ -286,8 +286,13 @@ function createVoice(onState) {
   const start = async () => {
     wire();
     try {
-      if (ctx && ctx.state === "suspended") await ctx.resume();
+      if (ctx && ctx.state === "suspended") await ctx.resume().catch(() => {});
       await el.play();
+      if (ctx && ctx.state !== "running") {   // routed through a sleeping context = silence (Safari / iOS)
+        el.pause();
+        onState("blocked");
+        return false;
+      }
       return true;
     } catch (e) { onState("blocked"); return false; }
   };
@@ -319,6 +324,7 @@ function createVoice(onState) {
       return true;
     },
     replay() { if (el.src) { el.currentTime = 0; return start(); } return false; },
+    hasAudio() { return !!el.src; },
     resume: start,
     stop,
     setMuted(v) { muted = v; el.muted = v; if (v && synth) stop(); },
@@ -383,6 +389,17 @@ function createAvatar(root) {
   });
 
   // The avatar "thinks" while the app is working on the next reply.
+  const onPress = (ev) => {
+    const t = ev.target;
+    if (t && t.closest && t.closest('[data-testid="stChatInputMicButton"]')) {
+      voice.stop();
+      if (state === "speaking") setState("listening");
+    }
+  };
+  document.addEventListener("pointerdown", onPress, true);
+  const onKey = (ev) => { if (ev.key === "Enter" || ev.key === " ") onPress(ev); };
+  document.addEventListener("keydown", onKey, true);
+
   const app = document.querySelector('[data-testid="stApp"]');
   const readBusy = () => {
     const now = !!app && app.getAttribute("data-test-script-state") === "running";
@@ -489,13 +506,15 @@ function createAvatar(root) {
       if (data.turn != null && data.turn !== turn) {
         turn = data.turn;
         if (data.audio) voice.playBase64(data.audio, data.mime);
-        else if (data.text && !voice.speakText(data.text)) setState(data.live ? "listening" : "idle");
+        else if (data.browser_voice && data.text && !voice.speakText(data.text)) setState(data.live ? "listening" : "idle");
       }
-      replayBtn.hidden = !data.audio;
+      replayBtn.hidden = !voice.hasAudio();
     },
     destroy() {
       alive = false; cancelAnimationFrame(raf);
       if (observer) observer.disconnect();
+      document.removeEventListener("pointerdown", onPress, true);
+      document.removeEventListener("keydown", onKey, true);
       voice.destroy();
     },
   };

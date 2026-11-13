@@ -62,8 +62,8 @@ that is the trade for costing nothing.
 |---|---|---|
 | Interviewer model | Groq: `openai/gpt-oss-120b` -> `qwen/qwen3.8-27b` -> `openai/gpt-oss-20b` | Each model has its own daily budget; the app falls through the list on a rate limit |
 | Report model | Gemini `gemini-3.8-flash` if a key is set, otherwise Groq | Optional |
-| Speech-to-text | Groq Whisper large v3 | |
-| Text-to-speech | edge-tts (`he-IL-AvriNeural`), fallback gTTS, last resort the browser's own voice | No key |
+| Speech-to-text | Gemini 3.5 Transcribe if a Gemini key is set, otherwise Groq Whisper large v3 | Small free quota on Gemini; falls back to Whisper |
+| Text-to-speech | Gemini 3.8 Flash TTS (native Hebrew voice per interviewer) -> edge-tts (`he-IL-AvriNeural`) -> gTTS -> the browser's own voice | The voice is chosen once per interview, so it never switches mid-conversation |
 | Avatar | In-browser WebGL + Web Audio | No service at all |
 | Hosting | Streamlit Community Cloud | |
 | Database | Firebase Firestore, Spark plan | Optional |
@@ -83,8 +83,17 @@ cp .streamlit/secrets.toml.example .streamlit/secrets.toml   # then put your Gro
 streamlit run interview_mirror_app.py
 ```
 
-Only `GROQ_API_KEY` is required. Without the Firestore block the app runs and
-simply does not save interviews.
+Only `GROQ_API_KEY` is required. A free `GEMINI_API_KEY` is strongly recommended:
+it gives the interviewer a much more natural Hebrew voice and transcribes spoken
+answers more accurately. Without the Firestore block the app runs and simply
+does not save interviews.
+
+**Diagnostics:** open the app with `?debug=1` at the end of the address to see
+which voice and transcription engines are actually in use.
+
+**Voice answers:** after recording, the transcript is placed in the input box so
+the candidate can check or fix it and then press Enter. The interviewer stops
+talking as soon as the microphone button is pressed.
 
 ## Tests
 
@@ -124,7 +133,7 @@ Firestore is schemaless, so v2 needs no migration.
 ## Known limits
 
 - Lip movement follows the sound of the voice, not the exact phonemes.
-- All three interviewers use the same male Hebrew voice at different pitch and pace.
+- Without a Gemini key (or once its free daily quota is used up) all three interviewers share the same Edge voice.
 - Free model quotas are shared by everyone using the deployment; at busy
   moments a reply can be delayed (the answer is kept and can be resent).
 - `D-ID avatar concept.mp4` in the repository is the earlier paid-avatar concept, kept for reference.
