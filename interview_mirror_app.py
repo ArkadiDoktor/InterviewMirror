@@ -8,13 +8,15 @@ The screen flow is setup -> interview room -> report. The logic lives in the
 from __future__ import annotations
 
 import base64
+import re
 import time
+from difflib import SequenceMatcher
 from html import escape
 
 import streamlit as st
 
 from im import avatar, report, speech, storage, ui
-from im.config import has_llm_key
+from im.config import PROVIDERS, has_llm_key, secret
 from im.engine import Interview, InterviewEngine, question_part
 from im.llm import LLMUnavailable
 from im.personas import LENGTHS, LEVELS, PERSONAS
@@ -29,11 +31,31 @@ engine = InterviewEngine()
 
 
 # ------------------------------------------------------------------ helpers
+def tts_engines() -> list[str]:
+    """Voice engines for a new interview, best first."""
+    custom = secret("TTS_ENGINES")
+    if custom:
+        return [e.strip() for e in custom.split(",") if e.strip() in speech.ENGINES]
+    return (["gemini"] if PROVIDERS["gemini"].key() else []) + ["edge", "gtts"]
+
+
 def speak(iv: Interview, text: str) -> None:
-    """Prepare the interviewer's voice for the avatar (None -> browser fallback)."""
-    result = speech.synthesize(text, iv.persona.voice)
-    ss.voice = {"turn": len(iv.turns), "audio": result[0] if result else None,
-                "mime": result[1] if result else "audio/mpeg", "text": text}
+    """Prepare the interviewer's voice for the avatar. The engine is sticky per interview:
+    once a better engine fails it is not tried again, so the voice never switches back and forth."""
+    engines = ss.get("tts_engines") or tts_engines()
+    result = speech.synthesize(text, iv.persona.voice, engines)
+    if result:
+        used = result.engine.split(":")[0]
+        if used in engines:
+            ss.tts_engines = engines[engines.index(used):]
+    ss.voice = {"turn": len(iv.turns), "audio": result.audio if result else None, "mime": result.mime if result else "",
+                "engine": result.engine if result else "browser", "text": text, "sent": False}
+
+
+def vocabulary(iv: Interview) -> list[str]:
+    """Latin-script terms the candidate is likely to say (React, SQL, Full Stack ...)."""
+    words = re.findall(r"[A-Za-z][A-Za-z0-9+#./-]{1,30}", " ".join((iv.role, iv.job_desc, iv.cv)))
+    return list(dict.fromkeys(words))[:40]
 
 
 def unavailable_message(exc: LLMUnavailable) -> str:
@@ -99,6 +121,7 @@ def setup_screen() -> None:
         if not (role or "").strip():
             problem.error("צריך למלא את שם התפקיד כדי שהמראיין ידע על מה לשאול.")
             return
+        ss.tts_engines = tts_engines()
         iv = engine.create(
             persona_key=ss.persona, role=role, level=level, gender="f" if gender == "בלשון נקבה" else "m",
             n_questions=LENGTHS.get(length or "רגיל", 8), company=company, job_desc=job_desc, cv=cv,
@@ -113,6 +136,7 @@ def setup_screen() -> None:
             return
         ss.report = None
         ss.pending = None
+        ss.draft = ss.voice_draft = None
         go("interview")
 
 
@@ -143,8 +167,13 @@ def interview_screen() -> None:
     left, right = st.columns([5, 7], gap="large")
 
     with left:
-        avatar.render(p, turn=voice.get("turn"), audio=voice.get("audio"), mime=voice.get("mime", "audio/mpeg"),
-                      text=voice.get("text", ""), live=iv.active, started=iv.started_at, ended=iv.ended_at)
+        fresh = not voice.get("sent")                 # the audio travels to the browser once per turn
+        avatar.render(p, turn=voice.get("turn"), audio=voice.get("audio") if fresh else None,
+                      mime=voice.get("mime") or "audio/mpeg", text=voice.get("text", ""),
+                      browser_voice=voice.get("engine") == "browser", live=iv.active,
+                      started=iv.started_at, ended=iv.ended_at)
+        if voice:
+            voice["sent"] = True
         if iv.phase == "wrap":
             ui.progress("שאלות אחרונות", "הזמן שלך לשאול", 1.0, p.accent)
         elif iv.active:
@@ -183,24 +212,52 @@ def interview_screen() -> None:
                 take_answer(iv, pending["text"], pending["method"], box, echo=False)
             return
 
+        draft = ss.get("draft")
+        if draft:                                      # a fresh transcript goes into the box for checking
+            ss["answer"] = draft["text"]
+            ss.voice_draft, ss.draft = draft, None
+        if ss.get("voice_draft"):
+            st.caption("זה מה שהבנתי מההקלטה. אפשר לתקן ולשלוח ב-Enter, או להקליט שוב.")
         sent = st.chat_input("כתיבת תשובה, או לחיצה על המיקרופון כדי לענות בקול", accept_audio=True,
                              key="answer", submit_mode="disable")
         if not sent:
             return
-        text, method = (sent.text or "").strip(), "text"
+        text = (sent.text or "").strip()
         if not text and sent.audio is not None:
-            method = "voice"
+            ss.voice_draft = None
             try:
                 with st.spinner("מתמלל את התשובה…"):
-                    text = speech.transcribe(sent.audio.getvalue(), hint=f"ראיון עבודה לתפקיד {iv.role}.")
+                    result = speech.transcribe(sent.audio.getvalue(), hint=question_part(iv.last_interviewer_line),
+                                               vocabulary=vocabulary(iv))
             except speech.SpeechError as exc:
                 st.warning(str(exc))
                 return
-            if not text:
-                st.warning("לא נשמע דיבור בהקלטה. כדאי לבדוק שהמיקרופון פעיל ולהקליט שוב.")
+            ss.last_stt = result.engine
+            if not result.text:
+                st.warning("לא נשמע דיבור ברור בהקלטה. כדאי לבדוק שהמיקרופון הנכון פעיל ולהקליט שוב.")
                 return
+            ss.draft = {"text": result.text, "engine": result.engine}
+            st.rerun()
         if text:
+            spoken = ss.get("voice_draft")
+            method = "voice" if spoken and SequenceMatcher(None, text, spoken["text"]).ratio() > 0.5 else "text"
+            ss.voice_draft = None
             take_answer(iv, text, method, box)
+
+
+def diagnostics() -> None:
+    """Open the app with ?debug=1 to see which engines are actually in use."""
+    if st.query_params.get("debug") != "1":
+        return
+    with st.expander("אבחון"):
+        voice = ss.get("voice") or {}
+        st.write({
+            "קול המראיין": voice.get("engine", "-"),
+            "מנועי קול שנותרו בראיון": ss.get("tts_engines"),
+            "תמלול אחרון": ss.get("last_stt", "-"),
+            "מפתח Gemini": bool(PROVIDERS["gemini"].key()),
+            "מפתח Groq": bool(PROVIDERS["groq"].key()),
+        })
 
 
 # ------------------------------------------------------------------- report
@@ -278,6 +335,7 @@ def report_screen() -> None:
 
 if ss.stage == "interview" and ss.get("iv"):
     interview_screen()
+    diagnostics()
 elif ss.stage == "report" and ss.get("iv"):
     report_screen()
 else:

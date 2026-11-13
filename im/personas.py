@@ -110,7 +110,8 @@ FRIENDLY = Persona(
     max_followups=2,
     early_exit="אני חושב שנעצור כאן. קשה לי להכיר אותך באמת בצורה הזו, וחבל על הזמן של שנינו. תודה שהגעת, ובהצלחה.",
     bridge="בסדר, בוא נמשיך הלאה.",
-    voice={"name": "he-IL-AvriNeural", "rate": "+0%", "pitch": "+2Hz"},
+    voice={"key": "friendly", "edge": "he-IL-AvriNeural", "edge_rate": "+0%", "prebuilt": "Achird", "pitch": "medium",
+           "traits": ("warm", "friendly", "conversational", "kind"), "style": "warm, friendly and relaxed"},
     mood={"smile": 0.35, "brow": 0.1, "energy": 1.15, "nods": 1.5, "blinks": 1.0, "tilt": 1.0, "mouth": 0.85},
 )
 
@@ -188,7 +189,8 @@ TECHNICAL = Persona(
     max_followups=2,
     early_exit="אני עוצר כאן. הזמן שלי מוגבל ואני לא מקבל תשובות מקצועיות, אז אין טעם להמשיך. תודה.",
     bridge="אוקיי, נעבור לנושא אחר.",
-    voice={"name": "he-IL-AvriNeural", "rate": "-3%", "pitch": "-2Hz"},
+    voice={"key": "technical", "edge": "he-IL-AvriNeural", "edge_rate": "-3%", "prebuilt": "Charon", "pitch": "medium",
+           "traits": ("clear", "informative", "calm", "even", "professional"), "style": "calm, precise and matter-of-fact"},
     mood={"smile": 0.0, "brow": 0.0, "energy": 0.75, "nods": 0.7, "blinks": 0.9, "tilt": 0.4, "mouth": 0.8},
 )
 
@@ -266,7 +268,8 @@ TOUGH = Persona(
     max_followups=3,
     early_exit="אנחנו מסיימים כאן. אין לי זמן לזה. תודה, ויום טוב.",
     bridge="נמשיך.",
-    voice={"name": "he-IL-AvriNeural", "rate": "+6%", "pitch": "-6Hz"},
+    voice={"key": "tough", "edge": "he-IL-AvriNeural", "edge_rate": "+5%", "prebuilt": "Orus", "pitch": "low",
+           "traits": ("firm", "authoritative", "mature", "deep", "serious"), "style": "curt, cool and serious, brisk pace"},
     mood={"smile": -0.25, "brow": -0.45, "energy": 0.55, "nods": 0.3, "blinks": 0.75, "tilt": 0.0, "mouth": 0.8},
 )
 

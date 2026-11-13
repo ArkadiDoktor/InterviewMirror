@@ -41,7 +41,9 @@ def photo_path(persona: Persona) -> str:
 
 
 def render(persona: Persona, *, turn: int | None = None, audio: bytes | None = None, mime: str = "audio/mpeg",
-           text: str = "", live: bool = False, started: float = 0.0, ended: float = 0.0, key: str = "avatar") -> None:
+           text: str = "", browser_voice: bool = False, live: bool = False, started: float = 0.0, ended: float = 0.0,
+           key: str = "avatar") -> None:
+    """``audio`` is sent once per turn; ``browser_voice`` asks the browser to read ``text`` when the server had no voice."""
     photo, mesh = _face(persona.key)
     _component()(
         key=key,
@@ -57,6 +59,7 @@ def render(persona: Persona, *, turn: int | None = None, audio: bytes | None = N
             "audio": base64.b64encode(audio).decode() if audio else "",
             "mime": mime,
             "text": text,
+            "browser_voice": browser_voice,
             "live": live,
             "started": started,
             "ended": ended,
