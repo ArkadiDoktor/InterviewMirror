@@ -1,0 +1,40 @@
+# Runs on every push and pull request: unit tests, lint, and a real start-up of the app.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements-dev.txt pyflakes==3.2.0 playwright==1.63.0
+
+      - name: Lint
+        run: python -m pyflakes interview_mirror_app.py im tools tests
+
+      - name: Avatar script syntax
+        run: cp im/assets/avatar.js /tmp/avatar.mjs && node --check /tmp/avatar.mjs
+
+      - name: Unit tests
+        run: python -m pytest -q
+
+      - name: Smoke test (start the app and open it in a browser)
+        run: |
+          python -m playwright install --with-deps chromium
+          python -m streamlit run interview_mirror_app.py --server.headless true --server.port 8501 &
+          python tools/keep_awake.py http://localhost:8501

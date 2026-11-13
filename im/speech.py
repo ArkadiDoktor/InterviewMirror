@@ -15,14 +15,18 @@ Both are guarded against the phrases recognisers invent from silence.
 """
 from __future__ import annotations
 
+import array
 import asyncio
 import base64
 import io
 import logging
+import math
 import re
+import sys
 import threading
 import time
 import wave
+from collections import deque
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
@@ -46,6 +50,17 @@ _rest_until: dict[str, float] = {}          # engine/model -> time it may be tri
 _lock = threading.Lock()
 _voice_cache: dict[str, str] = {}           # persona key -> chosen Gemini voice id
 _working_stt: list[str] = []
+_errors: deque = deque(maxlen=25)            # recent failures, shown in the ?debug=1 panel
+_inline_audio_ok = [True]                   # flips to False if Gemini refuses inline audio
+
+
+def _note(engine: str, message: str) -> None:
+    _errors.append((time.strftime("%H:%M:%S"), engine, message[:200]))
+    log.warning("%s: %s", engine, message[:300])
+
+
+def recent_errors() -> list[tuple[str, str, str]]:
+    return list(_errors)
 
 
 class SpeechError(RuntimeError):
@@ -68,6 +83,16 @@ def _rest(name: str, seconds: float) -> None:
 def _resting(name: str) -> bool:
     with _lock:
         return _rest_until.get(name, 0) > time.time()
+
+
+def gemini_voice_out() -> bool:
+    """True when every Gemini voice model is out for a long while (daily quota, bad key)."""
+    if not _gemini_key():
+        return True
+    with _lock:
+        now = time.time()
+        return all(_rest_until.get(f"gemini-tts:{m}", 0) - now > 600
+                   for m in _models("GEMINI_TTS_MODELS", ("gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts")))
 
 
 def _gemini_key() -> str | None:
@@ -176,15 +201,21 @@ def _gemini_tts(text: str, persona: dict) -> Speech | None:
                 body["generation_config"]["speech_config"] = [{"voice": voice}]
                 resp = _gemini_post(api_key, body, 40)
             if resp.status_code == 429:
-                _rest(name, _quota_wait(resp, 60))
-                continue
+                wait = _quota_wait(resp, 60)
+                if wait <= 10:                       # per-minute limit: a short pause beats a different voice
+                    time.sleep(wait)
+                    resp = _gemini_post(api_key, body, 40)
+                if resp.status_code == 429:
+                    _rest(name, _quota_wait(resp, 60))
+                    _note(name, "quota reached (429)")
+                    continue
             if not resp.ok:
-                log.warning("%s failed: HTTP %s %s", name, resp.status_code, resp.text[:200])
+                _note(name, f"HTTP {resp.status_code} {resp.text[:150]}")
                 _rest(name, 600)
                 continue
             blocks = _collect(resp.json(), "audio")
             if not blocks:
-                log.warning("%s returned no audio", name)
+                _note(name, "reply contained no audio")
                 _rest(name, 300)
                 continue
             audio = base64.b64decode(blocks[-1]["data"])
@@ -195,7 +226,7 @@ def _gemini_tts(text: str, persona: dict) -> Speech | None:
                 audio, mime = pcm_to_wav(audio, 24000), "audio/wav"
             return Speech(audio, "audio/wav" if audio.startswith(b"RIFF") else mime, f"gemini:{model}/{voice}")
         except (requests.RequestException, ValueError, KeyError) as exc:
-            log.warning("%s error: %s", name, type(exc).__name__)
+            _note(name, type(exc).__name__)
             _rest(name, 120)
     return None
 
@@ -239,7 +270,7 @@ def _edge(text: str, voice: dict) -> Speech | None:
         if audio and len(audio) > 400:
             return Speech(audio, "audio/mpeg", f"edge:{voice.get('edge', 'he-IL-AvriNeural')}")
     except Exception as exc:  # noqa: BLE001
-        log.warning("edge-tts failed: %s: %s", type(exc).__name__, exc)
+        _note("edge-tts", f"{type(exc).__name__}: {exc}")
         _rest("edge", 120)
     return None
 
@@ -313,6 +344,34 @@ def clean_transcript(text: str, seconds: float | None, hint: str = "") -> str:
     return text
 
 
+def _upload_audio(api_key: str, audio: bytes) -> tuple[str, str] | None:
+    """Gemini Files API (resumable upload). Returns (file uri, file name) or None."""
+    upload_base = _gemini_base().replace("/v1beta", "/upload/v1beta")
+    start = requests.post(f"{upload_base}/files", timeout=(6, 20), headers={
+        "x-goog-api-key": api_key, "X-Goog-Upload-Protocol": "resumable", "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": str(len(audio)), "X-Goog-Upload-Header-Content-Type": "audio/wav",
+        "Content-Type": "application/json"}, json={"file": {"display_name": "answer.wav"}})
+    url = start.headers.get("x-goog-upload-url")
+    if not start.ok or not url:
+        _note("gemini-files", f"upload start HTTP {start.status_code}")
+        return None
+    done = requests.post(url, data=audio, timeout=(6, 60), headers={
+        "Content-Length": str(len(audio)), "X-Goog-Upload-Offset": "0", "X-Goog-Upload-Command": "upload, finalize"})
+    info = (done.json() if done.ok else {}).get("file", {})
+    if not info.get("uri"):
+        _note("gemini-files", f"upload HTTP {done.status_code}")
+        return None
+    return info["uri"], info.get("name", "")
+
+
+def _delete_upload(api_key: str, name: str) -> None:
+    if name:
+        try:
+            requests.delete(f"{_gemini_base()}/{name}", headers={"x-goog-api-key": api_key}, timeout=(5, 10))
+        except requests.RequestException:
+            pass   # uploads expire on their own after 48 hours
+
+
 def _gemini_stt(audio: bytes, vocabulary: list[str]) -> str | None:
     api_key = _gemini_key()
     if not api_key:
@@ -324,25 +383,39 @@ def _gemini_stt(audio: bytes, vocabulary: list[str]) -> str | None:
         cfg: dict = {"language_codes": ["he-IL", "en-US"]}
         if vocabulary:
             cfg["custom_vocabulary"] = vocabulary[:50]
-        body = {"model": model,
-                "input": [{"type": "audio", "data": base64.b64encode(audio).decode(), "mime_type": "audio/wav"}],
-                "generation_config": {"transcription_config": cfg}}
+        inline = {"type": "audio", "data": base64.b64encode(audio).decode(), "mime_type": "audio/wav"}
+        body = {"model": model, "input": [inline], "generation_config": {"transcription_config": cfg}}
+        uploaded = None
         try:
+            if not _inline_audio_ok[0]:
+                uploaded = _upload_audio(api_key, audio)
+                if uploaded:
+                    body["input"] = [{"type": "audio", "uri": uploaded[0], "mime_type": "audio/wav"}]
             resp = _gemini_post(api_key, body, 60)
+            if resp.status_code == 400 and _inline_audio_ok[0]:
+                _note(name, f"inline audio refused, switching to file upload: {resp.text[:120]}")
+                _inline_audio_ok[0] = False
+                uploaded = _upload_audio(api_key, audio)
+                if uploaded:
+                    body["input"] = [{"type": "audio", "uri": uploaded[0], "mime_type": "audio/wav"}]
+                    resp = _gemini_post(api_key, body, 60)
             if resp.status_code == 429:
                 _rest(name, _quota_wait(resp, 60))
+                _note(name, "quota reached (429)")
                 continue
             if not resp.ok:
-                log.warning("%s failed: HTTP %s %s", name, resp.status_code, resp.text[:200])
+                _note(name, f"HTTP {resp.status_code} {resp.text[:150]}")
                 _rest(name, 600)
                 continue
             payload = resp.json()
             texts = [b["text"] for b in _collect(payload.get("steps", payload), "text")]
-            text = " ".join(t for t in texts if t).strip() or str(payload.get("output_text", "")).strip()
-            return text
+            return " ".join(t for t in texts if t).strip() or str(payload.get("output_text", "")).strip()
         except (requests.RequestException, ValueError) as exc:
-            log.warning("%s error: %s", name, type(exc).__name__)
+            _note(name, type(exc).__name__)
             _rest(name, 120)
+        finally:
+            if uploaded:
+                _delete_upload(api_key, uploaded[1])
     return None
 
 
@@ -371,7 +444,7 @@ def _whisper(audio: bytes, hint: str) -> str:
             return (resp.json().get("text") or "").strip()
         except requests.RequestException as exc:
             last_error = f"{model}: {type(exc).__name__}"
-    log.error("transcription failed: %s", last_error)
+    _note("whisper", last_error)
     raise SpeechError("התמלול לא הצליח. אפשר לנסות שוב או להקליד את התשובה.")
 
 
@@ -399,3 +472,63 @@ def transcribe(audio: bytes, *, hint: str = "", vocabulary: list[str] | None = N
             except SpeechError as exc:
                 error = exc
     raise error or SpeechError("התמלול לא זמין כרגע. אפשר להקליד את התשובה.")
+
+
+@dataclass
+class AudioStats:
+    seconds: float
+    level_db: float        # loudness of the speech parts, dBFS (0 = maximum)
+    peak: float            # 0..1
+    clipped: float         # share of samples at the ceiling
+    verdict: str           # ok | quiet | very_quiet | distorted | silent
+
+    def message(self) -> str:
+        return {
+            "very_quiet": "ההקלטה שקטה מאוד. כדאי לבדוק שנבחר המיקרופון הנכון בדפדפן ולדבר קרוב יותר אליו.",
+            "quiet": "ההקלטה שקטה יחסית, וזה פוגע בדיוק התמלול. כדאי לדבר קרוב יותר למיקרופון.",
+            "distorted": "ההקלטה חזקה מדי ומעוותת. כדאי להתרחק מעט מהמיקרופון או להנמיך את עוצמת הקלט.",
+            "silent": "לא נקלט קול בהקלטה. כדאי לבדוק שהמיקרופון לא מושתק ושהדפדפן קיבל הרשאה.",
+        }.get(self.verdict, "")
+
+
+def audio_stats(data: bytes) -> AudioStats | None:
+    """Rough microphone check on a 16-bit WAV: is the speech loud enough and undistorted?"""
+    try:
+        with wave.open(io.BytesIO(data)) as w:
+            if w.getsampwidth() != 2:
+                return None
+            rate, frames = w.getframerate(), w.readframes(w.getnframes())
+            channels = w.getnchannels()
+    except Exception:  # noqa: BLE001
+        return None
+    samples = array.array("h", frames)
+    if sys.byteorder == "big":
+        samples.byteswap()
+    if channels > 1:
+        samples = samples[::channels]
+    if not samples:
+        return AudioStats(0.0, -120.0, 0.0, 0.0, "silent")
+    win = max(1, rate // 50)                                   # 20 ms windows
+    levels = []
+    for i in range(0, len(samples) - win + 1, win):
+        chunk = samples[i:i + win]
+        levels.append(math.sqrt(sum(x * x for x in chunk) / len(chunk)) / 32768)
+    levels.sort()
+    loud = levels[int(len(levels) * 0.8):] or levels          # the speech, not the pauses
+    rms = math.sqrt(sum(v * v for v in loud) / len(loud)) if loud else 0.0
+    level_db = 20 * math.log10(rms) if rms > 0 else -120.0
+    peak = max(abs(x) for x in samples) / 32768
+    clipped = sum(1 for x in samples if abs(x) >= 32700) / len(samples)
+    verdict = ("silent" if level_db < -55 else "very_quiet" if level_db < -38 else "quiet" if level_db < -30
+               else "distorted" if clipped > 0.005 else "ok")
+    return AudioStats(round(len(samples) / rate, 2), round(level_db, 1), round(peak, 3), round(clipped, 4), verdict)
+
+
+def transcribe_with(engine: str, audio: bytes, *, hint: str = "", vocabulary: list[str] | None = None) -> str:
+    """One engine only, raw output - for side-by-side comparison in the diagnostics panel."""
+    if engine == "gemini":
+        out = _gemini_stt(audio, vocabulary or [])
+        if out is None:
+            raise SpeechError("Gemini לא זמין כרגע (אין מפתח, מכסה, או שגיאה - ראו רשימת התקלות).")
+        return out
+    return _whisper(audio, hint)

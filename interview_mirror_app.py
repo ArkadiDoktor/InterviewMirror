@@ -15,7 +15,7 @@ from html import escape
 
 import streamlit as st
 
-from im import avatar, report, speech, storage, ui
+from im import admin, avatar, report, speech, storage, ui
 from im.config import PROVIDERS, has_llm_key, secret
 from im.engine import Interview, InterviewEngine, question_part
 from im.llm import LLMUnavailable
@@ -44,12 +44,21 @@ def speak(iv: Interview, text: str) -> None:
     once a better engine fails it is not tried again, so the voice never switches back and forth."""
     engines = ss.get("tts_engines") or tts_engines()
     result = speech.synthesize(text, iv.persona.voice, engines)
-    if result:
-        used = result.engine.split(":")[0]
-        if used in engines:
-            ss.tts_engines = engines[engines.index(used):]
+    used = result.engine.split(":")[0] if result else "browser"
+    # Drop Gemini for the rest of the interview only when it is out for long (daily quota), so a brief
+    # per-minute limit costs one sentence in another voice, not the whole interview.
+    if used != "gemini" and "gemini" in engines and speech.gemini_voice_out():
+        ss.tts_engines = [e for e in engines if e != "gemini"]
+    count("tts", used)
     ss.voice = {"turn": len(iv.turns), "audio": result.audio if result else None, "mime": result.mime if result else "",
                 "engine": result.engine if result else "browser", "text": text, "sent": False}
+
+
+def count(group: str, key: str) -> None:
+    """Per-interview usage counters, saved with the session for the statistics page."""
+    usage = ss.setdefault("usage", {})
+    usage.setdefault(group, {})
+    usage[group][key] = usage[group].get(key, 0) + 1
 
 
 def vocabulary(iv: Interview) -> list[str]:
@@ -122,6 +131,7 @@ def setup_screen() -> None:
             problem.error("צריך למלא את שם התפקיד כדי שהמראיין ידע על מה לשאול.")
             return
         ss.tts_engines = tts_engines()
+        ss.usage = {}
         iv = engine.create(
             persona_key=ss.persona, role=role, level=level, gender="f" if gender == "בלשון נקבה" else "m",
             n_questions=LENGTHS.get(length or "רגיל", 8), company=company, job_desc=job_desc, cv=cv,
@@ -137,6 +147,7 @@ def setup_screen() -> None:
         ss.report = None
         ss.pending = None
         ss.draft = ss.voice_draft = None
+        storage.save_session_start(iv)
         go("interview")
 
 
@@ -152,9 +163,11 @@ def take_answer(iv: Interview, text: str, method: str, box, echo: bool = True) -
     try:
         turn = engine.respond(iv, text, method)
     except LLMUnavailable as exc:
+        count("events", "model_busy")
         ss.pending = {"text": text, "method": method, "error": unavailable_message(exc)}
         st.rerun()
     ss.pending = None
+    count("answers", method)
     storage.save_turn(iv, turn)
     speak(iv, turn.reply)
     st.rerun()
@@ -225,14 +238,23 @@ def interview_screen() -> None:
         text = (sent.text or "").strip()
         if not text and sent.audio is not None:
             ss.voice_draft = None
+            audio = sent.audio.getvalue()
+            stats = speech.audio_stats(audio)
+            ss.last_audio, ss.last_stats = audio, stats
+            if stats and stats.verdict != "ok":
+                count("mic", stats.verdict)
+                st.warning(stats.message())
+                if stats.verdict == "silent":
+                    return
             try:
                 with st.spinner("מתמלל את התשובה…"):
-                    result = speech.transcribe(sent.audio.getvalue(), hint=question_part(iv.last_interviewer_line),
+                    result = speech.transcribe(audio, hint=question_part(iv.last_interviewer_line),
                                                vocabulary=vocabulary(iv))
             except speech.SpeechError as exc:
                 st.warning(str(exc))
                 return
             ss.last_stt = result.engine
+            count("stt", result.engine)
             if not result.text:
                 st.warning("לא נשמע דיבור ברור בהקלטה. כדאי לבדוק שהמיקרופון הנכון פעיל ולהקליט שוב.")
                 return
@@ -246,18 +268,42 @@ def interview_screen() -> None:
 
 
 def diagnostics() -> None:
-    """Open the app with ?debug=1 to see which engines are actually in use."""
+    """Open the app with ?debug=1 to see which engines are in use and to test the microphone."""
     if st.query_params.get("debug") != "1":
         return
-    with st.expander("אבחון"):
+    iv = ss.get("iv")
+    with st.expander("אבחון", expanded=True):
         voice = ss.get("voice") or {}
         st.write({
             "קול המראיין": voice.get("engine", "-"),
-            "מנועי קול שנותרו בראיון": ss.get("tts_engines"),
+            "מנועי קול זמינים בראיון": ss.get("tts_engines"),
             "תמלול אחרון": ss.get("last_stt", "-"),
             "מפתח Gemini": bool(PROVIDERS["gemini"].key()),
             "מפתח Groq": bool(PROVIDERS["groq"].key()),
         })
+        audio, stats = ss.get("last_audio"), ss.get("last_stats")
+        if audio:
+            st.markdown("**ההקלטה האחרונה שלך** – כדאי להאזין: אם היא נשמעת ברורה, הבעיה במנוע התמלול ולא במיקרופון.")
+            st.audio(audio, format="audio/wav")
+            if stats:
+                st.write({"משך (שניות)": stats.seconds, "עוצמת דיבור (dBFS, תקין: ‎-30 עד ‎-6)": stats.level_db,
+                          "שיא": stats.peak, "דגימות חתוכות": stats.clipped,
+                          "הערכה": {"ok": "תקין", "quiet": "שקט", "very_quiet": "שקט מאוד", "distorted": "מעוות",
+                                    "silent": "שקט מוחלט"}[stats.verdict]})
+            if st.button("השוואת מנועי תמלול על ההקלטה הזו"):
+                hint = question_part(iv.last_interviewer_line) if iv else ""
+                for name, eng in (("Gemini", "gemini"), ("Whisper (Groq)", "whisper")):
+                    try:
+                        with st.spinner(f"מתמלל עם {name}…"):
+                            st.markdown(f"**{name}:** {escape(speech.transcribe_with(eng, audio, hint=hint, vocabulary=vocabulary(iv) if iv else []))}")
+                    except speech.SpeechError as exc:
+                        st.markdown(f"**{name}:** לא זמין – {escape(str(exc))}")
+        else:
+            st.caption("אחרי הקלטה ראשונה יופיעו כאן ההקלטה, מדדי עוצמה וכפתור להשוואת מנועי תמלול.")
+        errors = speech.recent_errors()
+        if errors:
+            st.markdown("**תקלות אחרונות בשירותי הקול**")
+            st.code("\n".join(f"{t_} {eng}: {msg}" for t_, eng, msg in errors[-10:]), language=None)
 
 
 # ------------------------------------------------------------------- report
@@ -275,7 +321,7 @@ def report_screen() -> None:
     if not ss.get("report"):
         with st.spinner("מכין את סיכום הראיון…"):
             ss.report = report.build_report(iv)
-            storage.save_session(iv, ss.report)
+            storage.save_session(iv, ss.report, ss.get("usage"))
     rep = ss.report
     color = {"advance": ui.GOOD, "borderline": ui.MID, "reject": ui.LOW}[rep["verdict"]]
     minutes = max(1, round(((iv.ended_at or time.time()) - iv.started_at) / 60))
@@ -333,7 +379,9 @@ def report_screen() -> None:
         go("setup")
 
 
-if ss.stage == "interview" and ss.get("iv"):
+if st.query_params.get("admin") == "1":
+    admin.render()
+elif ss.stage == "interview" and ss.get("iv"):
     interview_screen()
     diagnostics()
 elif ss.stage == "report" and ss.get("iv"):

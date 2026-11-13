@@ -95,6 +95,35 @@ which voice and transcription engines are actually in use.
 the candidate can check or fix it and then press Enter. The interviewer stops
 talking as soon as the microphone button is pressed.
 
+## Operations
+
+**Diagnostics** - add `?debug=1` to the app address: which voice and transcription
+engines are in use, recent service errors, and for voice answers a playback of
+your last recording with a loudness check and a side-by-side comparison of the
+two transcription engines.
+
+**Statistics** - add `?admin=1` to the app address (needs `ADMIN_PASSWORD` in
+secrets and Firestore): interviews per day, completion rate, scores per
+interviewer, how interviews ended, voice vs. typed answers, and which voice /
+transcription engines were actually used (a shift from Gemini to the fallbacks
+means the free quota is running out). Only aggregates are shown, never answers.
+
+**CI** (`.github/workflows/ci.yml`) - on every push and pull request: lint, unit
+tests, a syntax check of the avatar script, and a smoke test that starts the app
+and opens it in a headless browser.
+
+**Keep awake + uptime check** (`.github/workflows/keep-awake.yml`) - every 5 hours
+a headless browser opens the app (Streamlit Community Cloud puts apps to sleep
+after 12 hours without visitors, and a plain HTTP request does not wake them).
+A failed run means the app did not come up; GitHub emails you. Set the repository
+variable `APP_URLS` once (Settings -> Secrets and variables -> Actions -> Variables).
+GitHub pauses scheduled workflows in public repositories after 60 days without
+any commits; it emails a warning, and one click re-enables it.
+
+**CD** - Streamlit Community Cloud redeploys automatically on every push to the
+branch the app is deployed from. Deploy from `main`, work on another branch, and
+merge through a pull request once CI is green.
+
 ## Tests
 
 ```bash
