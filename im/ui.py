@@ -193,3 +193,28 @@ def score_chart(scores: list[int]) -> None:
     st.html(
         f'<div class="im-chart">{_svg_img(svg, f"ציון לכל תשובה לאורך הראיון, ממוצע {avg:.1f}", "width:100%;display:block")}'
         f'<p class="im-note" style="margin:0 4px 6px">ציון לכל תשובה לפי הסדר. הקו המקווקו הוא הממוצע שלך: {avg:.1f}.</p></div>')
+
+
+def day_bars(counts: dict[str, int], accent: str = "#2f5bea") -> None:
+    """Simple bar chart (label -> count) drawn as an image, so labels never get clipped."""
+    if not counts:
+        return
+    items = list(counts.items())
+    w, h, pad_l, pad_b, top = 760, 220, 34, 30, 14
+    top_val = max(v for _, v in items) or 1
+    slot = (w - pad_l - 8) / len(items)
+    bar_w = max(4.0, slot * 0.62)
+    y = lambda v: top + (1 - v / top_val) * (h - top - pad_b)  # noqa: E731
+    step = max(1, len(items) // 14)
+    parts = [f'<line x1="{pad_l}" x2="{w - 8}" y1="{y(0)}" y2="{y(0)}" stroke="{LINE}"/>',
+             f'<text x="{pad_l - 8}" y="{y(top_val) + 4}" font-size="11" fill="{MUTED}" text-anchor="end">{top_val}</text>',
+             f'<text x="{pad_l - 8}" y="{y(0) + 4}" font-size="11" fill="{MUTED}" text-anchor="end">0</text>']
+    for i, (label, v) in enumerate(items):
+        x = pad_l + i * slot + (slot - bar_w) / 2
+        parts.append(f'<rect x="{x:.1f}" y="{y(v):.1f}" width="{bar_w:.1f}" height="{y(0) - y(v):.1f}" rx="3" fill="{accent}"/>')
+        if v:
+            parts.append(f'<text x="{x + bar_w / 2:.1f}" y="{y(v) - 4:.1f}" font-size="11" fill="{INK}" text-anchor="middle">{v}</text>')
+        if i % step == 0:
+            parts.append(f'<text x="{x + bar_w / 2:.1f}" y="{h - 10}" font-size="11" fill="{MUTED}" text-anchor="middle">{escape(label)}</text>')
+    svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" font-family="Arial, sans-serif">{"".join(parts)}</svg>'
+    st.html(f'<div class="im-chart">{_svg_img(svg, "ראיונות לפי יום", "width:100%;display:block")}</div>')

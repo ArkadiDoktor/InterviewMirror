@@ -27,7 +27,7 @@ from .llm import LLMResult, chat_json
 from .personas import LEVELS, PERSONAS, Persona, Topic
 
 MAX_ANSWER_CHARS = 2500
-HISTORY_EXCHANGES = 7
+HISTORY_EXCHANGES = 40          # keep the whole interview: an unchanged prefix is cached by Groq and not counted against limits
 WRAP_MAX_TURNS = 3
 
 ANY_QUESTIONS = {

@@ -201,7 +201,7 @@ def test_storage_writes_v1_fields_and_never_raises(monkeypatch):
         def __init__(self, name):
             self.name = name
 
-        def set(self, data):
+        def set(self, data, merge=False):
             written[self.name] = data
 
     class DB:
@@ -213,13 +213,15 @@ def test_storage_writes_v1_fields_and_never_raises(monkeypatch):
     eng.start(iv)
     turn = eng.respond(iv, "תשובה", "voice")
     monkeypatch.setattr(storage, "_client", lambda: DB())
-    assert storage.save_turn(iv, turn) and storage.save_session(iv, {"overall": 70})
+    assert storage.save_session_start(iv) and written["interview_sessions"]["status"] == "started"
+    assert storage.save_turn(iv, turn) and storage.save_session(iv, {"overall": 70}, {"tts": {"edge": 2}})
     row = written["interview_responses"]
     for key in ("interview_id", "turn_index", "interviewer_type", "job_role", "question", "user_answer", "score",
                 "ai_feedback", "input_method", "timestamp"):
         assert key in row
     assert row["interviewer_type"] == "ידידותי" and row["score"] == 8 and row["input_method"] == "voice"
     assert written["interview_sessions"]["report"] == {"overall": 70}
+    assert written["interview_sessions"]["overall"] == 70 and written["interview_sessions"]["usage"] == {"tts": {"edge": 2}}
 
     class Broken:
         def collection(self, name):
@@ -229,3 +231,47 @@ def test_storage_writes_v1_fields_and_never_raises(monkeypatch):
     assert storage.save_turn(iv, turn) is False                       # logged, not raised
     monkeypatch.setattr(storage, "_client", lambda: None)
     assert storage.save_turn(iv, turn) is False
+
+
+def test_statistics_aggregation():
+    from datetime import datetime, timezone
+
+    from im.admin import compute_stats
+
+    day = datetime(2026, 11, 10, 12, tzinfo=timezone.utc)
+    rows = [
+        {"status": "finished", "persona": "tough", "overall": 60, "duration_sec": 600, "end_reason": "completed",
+         "started": day, "job_role": "אנליסט", "usage": {"tts": {"gemini": 9, "edge": 3}, "answers": {"voice": 4}}},
+        {"status": "finished", "persona": "tough", "overall": 80, "duration_sec": 900, "end_reason": "terminated",
+         "started": day, "job_role": "אנליסט", "usage": {"tts": {"gemini": 3}, "events": {"model_busy": 2}}},
+        {"status": "started", "persona": "friendly", "started": day, "job_role": "מתכנת"},
+    ]
+    s = compute_stats(rows)
+    assert (s["started"], s["finished"], s["completion"], s["avg_score"], s["avg_minutes"]) == (3, 2, 67, 70, 12.5)
+    assert s["per_day"] == {"10.11": 3} and s["by_persona"]["קשוח"] == {"התחילו": 2, "ציון ממוצע": 70}
+    assert s["tts"]["gemini"].startswith("12 ") and s["model_busy"] == 2
+    assert "ננטש באמצע" in s["end_reasons"] and s["roles"][0] == ("אנליסט", 2)
+    assert compute_stats([])["started"] == 0
+
+
+def test_microphone_check():
+    import io
+    import math
+    import struct
+    import wave
+
+    from im.speech import audio_stats
+
+    def tone(amp, seconds=2.0, rate=16000):
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate)
+            w.writeframes(b"".join(struct.pack("<h", int(max(-1, min(1, amp * math.sin(i / 8))) * 32767))
+                                   for i in range(int(rate * seconds))))
+        return buf.getvalue()
+
+    assert audio_stats(tone(0.3)).verdict == "ok"
+    assert audio_stats(tone(0.02)).verdict == "quiet" or audio_stats(tone(0.02)).verdict == "very_quiet"
+    assert audio_stats(tone(0.0005)).verdict == "silent"
+    assert audio_stats(tone(3.0)).verdict == "distorted"
+    assert audio_stats(b"not a wav") is None

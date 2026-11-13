@@ -91,7 +91,37 @@ def save_turn(iv, turn) -> bool:
         return False
 
 
-def save_session(iv, report: dict | None) -> bool:
+def _session_base(iv) -> dict:
+    return {
+        "interview_id": iv.interview_id,
+        "interviewer_type": iv.persona.label,
+        "persona": iv.persona_key,
+        "job_role": iv.role,
+        "level": iv.level,
+        "planned_questions": iv.n_questions,
+        "coach_mode": iv.coach,
+        "app_version": 2,
+    }
+
+
+def save_session_start(iv) -> bool:
+    """Written when an interview starts, so abandoned interviews show up in the statistics."""
+    db = _client()
+    if db is None:
+        return False
+    try:
+        from firebase_admin import firestore
+
+        db.collection("interview_sessions").document(iv.interview_id).set(
+            {**_session_base(iv), "status": "started", "started": firestore.SERVER_TIMESTAMP,
+             "timestamp": firestore.SERVER_TIMESTAMP})
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.error("saving session start failed: %s: %s", type(exc).__name__, exc)
+        return False
+
+
+def save_session(iv, report: dict | None, usage: dict | None = None) -> bool:
     db = _client()
     if db is None:
         return False
@@ -99,23 +129,43 @@ def save_session(iv, report: dict | None) -> bool:
         from firebase_admin import firestore
 
         db.collection("interview_sessions").document(iv.interview_id).set({
-            "interview_id": iv.interview_id,
-            "interviewer_type": iv.persona.label,
-            "job_role": iv.role,
-            "level": iv.level,
-            "planned_questions": iv.n_questions,
+            **_session_base(iv),
+            "status": "finished",
             "questions_reached": iv.main_no,
             "turns": len(iv.turns),
             "scores": iv.scores,
             "disruptions": iv.strikes,
             "end_reason": iv.end_reason,
             "duration_sec": int(max(0, (iv.ended_at or 0) - (iv.started_at or 0))),
-            "coach_mode": iv.coach,
+            "overall": (report or {}).get("overall"),
+            "verdict": (report or {}).get("verdict"),
+            "report_model": (report or {}).get("source"),
+            "usage": usage or {},
             "report": report,
             "timestamp": firestore.SERVER_TIMESTAMP,
-            "app_version": 2,
-        })
+        }, merge=True)
         return True
     except Exception as exc:  # noqa: BLE001
         log.error("saving session failed: %s: %s", type(exc).__name__, exc)
         return False
+
+
+def load_sessions(days: int = 30, limit: int = 2000) -> list[dict] | None:
+    """Recent interview sessions (without the full report text) for the statistics page."""
+    db = _client()
+    if db is None:
+        return None
+    from datetime import datetime, timedelta, timezone
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = []
+    try:
+        query = db.collection("interview_sessions").where("timestamp", ">=", since).limit(limit)
+        for doc in query.stream():
+            d = doc.to_dict() or {}
+            d.pop("report", None)
+            rows.append(d)
+    except Exception as exc:  # noqa: BLE001
+        log.error("loading sessions failed: %s: %s", type(exc).__name__, exc)
+        return None
+    return rows

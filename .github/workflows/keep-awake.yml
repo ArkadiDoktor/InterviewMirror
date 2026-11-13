@@ -1,0 +1,35 @@
+# Keeps the Streamlit app from falling asleep and doubles as an uptime check:
+# a red run means the app did not come up, and GitHub emails you about it.
+#
+# Setup once: repository Settings -> Secrets and variables -> Actions -> Variables ->
+#   New variable  APP_URLS = https://your-app.streamlit.app   (comma-separate several apps)
+name: Keep awake
+
+on:
+  schedule:
+    - cron: "17 */5 * * *"   # every 5 hours (the app sleeps after 12 hours without visitors)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install browser
+        run: |
+          pip install playwright==1.63.0
+          python -m playwright install --with-deps chromium
+
+      - name: Visit the app
+        env:
+          APP_URLS: ${{ vars.APP_URLS }}
+        run: python tools/keep_awake.py
